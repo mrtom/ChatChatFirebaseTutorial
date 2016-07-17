@@ -21,15 +21,18 @@
 */
 
 import UIKit
+import Photos
 import Firebase
 import JSQMessagesViewController
+import SwiftGifOrigin
 
-final class ChatViewController: JSQMessagesViewController {
+final class ChatViewController: JSQMessagesViewController, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
   
   // MARK: Properties
   var channelRef: FIRDatabaseReference?
   
   private lazy var messageRef: FIRDatabaseReference = self.channelRef!.child("messages")
+  private lazy var storageRef: FIRStorageReference = self.setupStorage()
   private lazy var userIsTypingRef: FIRDatabaseReference = self.channelRef!.child("typingIndicator").child(self.senderId)
   private lazy var usersTypingQuery: FIRDatabaseQuery = self.channelRef!.child("typingIndicator").queryOrderedByValue().queryEqualToValue(true)
   
@@ -133,6 +136,49 @@ final class ChatViewController: JSQMessagesViewController {
       return NSAttributedString(string: senderDisplayName)
     }
   }
+
+  // MARK: Image Picking
+  
+  func imagePickerController(picker: UIImagePickerController, didFinishPickingMediaWithInfo info: [String : AnyObject]) {
+    picker.dismissViewControllerAnimated(true, completion:nil)
+    
+    if let photoReferenceUrl = info[UIImagePickerControllerReferenceURL] {
+      // Handle picking a Photo from the Photo Library
+      let assets = PHAsset.fetchAssetsWithALAssetURLs([photoReferenceUrl as! NSURL], options: nil)
+      let asset = assets.firstObject
+      asset?.requestContentEditingInputWithOptions(nil, completionHandler: { (contentEditingInput, info) in
+        let imageFileURL = contentEditingInput?.fullSizeImageURL
+        let path = "\(FIRAuth.auth()?.currentUser?.uid)/\(Int(NSDate.timeIntervalSinceReferenceDate() * 1000))/\(photoReferenceUrl.lastPathComponent!)"
+         
+        self.storageRef.child(path).putFile(imageFileURL!, metadata: nil) { (metadata, error) in
+          if let error = error {
+            print("Error uploading photo: \(error.description)")
+            return
+          }
+          self.sendPhotoMessageWithPhotoURL(self.storageRef.child((metadata?.path)!).description)
+        }
+        
+      })
+    } else {
+      // Handle picking a Photo from the Camera
+      let image = info[UIImagePickerControllerOriginalImage] as! UIImage
+      let imageData = UIImageJPEGRepresentation(image, 1.0)
+      let imagePath = FIRAuth.auth()!.currentUser!.uid + "/\(Int(NSDate.timeIntervalSinceReferenceDate() * 1000)).jpg"
+      let metadata = FIRStorageMetadata()
+      metadata.contentType = "image/jpeg"
+      storageRef.child(imagePath).putData(imageData!, metadata: metadata) { (metadata, error) in
+        if let error = error {
+          print("Error uploading photo: \(error)")
+          return
+        }
+        self.sendPhotoMessageWithPhotoURL(self.storageRef.child((metadata?.path)!).description)
+      }
+    }
+  }
+
+  func imagePickerControllerDidCancel(picker: UIImagePickerController) {
+    picker.dismissViewControllerAnimated(true, completion:nil)
+  }
   
   // MARK: Firebase related methods
   
@@ -147,10 +193,46 @@ final class ChatViewController: JSQMessagesViewController {
       if let id = messageData["senderId"] as String!, name = messageData["senderName"] as String!, text = messageData["text"] as String! where text.characters.count > 0 {
         self.addMessage(withId: id, name: name, text: text)
         self.finishReceivingMessage()
+      } else if let id = messageData["senderId"] as String!, photoURL = messageData["photoURL"] as String! {
+        let mediaItem = JSQPhotoMediaItem(maskAsOutgoing: id == self.senderId)
+        self.addPhotoMessage(withId: id, mediaItem: mediaItem)
+
+        if photoURL.hasPrefix("gs://") {
+          self.fetchImageDataAtURL(photoURL, forMediaItem: mediaItem)
+        }
       } else {
         print("Error! Could not decode message data")
       }
     })
+  }
+  
+  func setupStorage() -> FIRStorageReference {
+    // FIXME: Needs to be changed to a dummy <your value here> value in the final version
+    return FIRStorage.storage().referenceForURL("gs://chatchat-rw-cf107.appspot.com")
+  }
+  
+  private func fetchImageDataAtURL(photoURL: String, forMediaItem mediaItem: JSQPhotoMediaItem) {
+    let storageRef = FIRStorage.storage().referenceForURL(photoURL)
+    storageRef.dataWithMaxSize(INT64_MAX){ (data, error) in
+      if let error = error {
+        print("Error downloading image data: \(error)")
+        return
+      }
+      
+      storageRef.metadataWithCompletion({ (metadata, metadataErr) in
+        if let error = metadataErr {
+          print("Error downloading metadata: \(error)")
+          return
+        }
+        
+        if (metadata?.contentType == "image/gif") {
+          mediaItem.image = UIImage.gifWithData(data!)
+        } else {
+          mediaItem.image = UIImage.init(data: data!)
+        }
+        self.collectionView.reloadData()
+      })
+    }
   }
   
   private func observeTyping() {
@@ -194,8 +276,23 @@ final class ChatViewController: JSQMessagesViewController {
     isTyping = false
   }
   
-  // MARK: UI and User Interaction
+  func sendPhotoMessageWithPhotoURL(url: String) {
+    let itemRef = messageRef.childByAutoId()
+    
+    let messageItem = [
+      "photoURL": url,
+      "senderId": senderId,
+    ]
+    
+    itemRef.setValue(messageItem)
+    
+    JSQSystemSoundPlayer.jsq_playMessageSentSound()
+    
+    finishSendingMessage()
+  }
   
+  // MARK: UI and User Interaction
+
   private func setupOutgoingBubble() -> JSQMessagesBubbleImage {
     let bubbleImageFactory = JSQMessagesBubbleImageFactory()
     return bubbleImageFactory.outgoingMessagesBubbleImageWithColor(UIColor.jsq_messageBubbleBlueColor())
@@ -205,11 +302,28 @@ final class ChatViewController: JSQMessagesViewController {
     let bubbleImageFactory = JSQMessagesBubbleImageFactory()
     return bubbleImageFactory.incomingMessagesBubbleImageWithColor(UIColor.jsq_messageBubbleLightGrayColor())
   }
-
+  
+  override func didPressAccessoryButton(sender: UIButton) {
+    let picker = UIImagePickerController()
+    picker.delegate = self
+    if (UIImagePickerController.isSourceTypeAvailable(UIImagePickerControllerSourceType.Camera)) {
+      picker.sourceType = UIImagePickerControllerSourceType.Camera
+    } else {
+      picker.sourceType = UIImagePickerControllerSourceType.PhotoLibrary
+    }
+    
+    presentViewController(picker, animated: true, completion:nil)
+  }
   
   private func addMessage(withId id: String, name: String, text: String) {
     let message = JSQMessage(senderId: id, displayName: name, text: text)
     messages.append(message)
+  }
+  
+  private func addPhotoMessage(withId id: String, mediaItem: JSQPhotoMediaItem) {
+    let message = JSQMessage(senderId: id, displayName: "", media: mediaItem)
+    messages.append(message)
+    collectionView.reloadData()
   }
   
   // MARK: UITextViewDelegate methods
