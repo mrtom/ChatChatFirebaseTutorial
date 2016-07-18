@@ -26,6 +26,12 @@ import Firebase
 import JSQMessagesViewController
 import SwiftGifOrigin
 
+enum BubbleTheme: Int {
+  case blueGray = 0
+  case greenGray
+  case redBlue
+}
+
 final class ChatViewController: JSQMessagesViewController, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
   
   // MARK: Properties
@@ -37,6 +43,7 @@ final class ChatViewController: JSQMessagesViewController, UIImagePickerControll
   private lazy var storageRef: FIRStorageReference = self.setupStorage()
   private lazy var userIsTypingRef: FIRDatabaseReference = self.channelRef!.child("typingIndicator").child(self.senderId)
   private lazy var usersTypingQuery: FIRDatabaseQuery = self.channelRef!.child("typingIndicator").queryOrderedByValue().queryEqualToValue(true)
+  private lazy var remoteConfig: FIRRemoteConfig = self.setupRemoteConfig()
   
   private var newMessageRefHandle: FIRDatabaseHandle?
   private var updatedMessageRefHandle: FIRDatabaseHandle?
@@ -61,13 +68,14 @@ final class ChatViewController: JSQMessagesViewController, UIImagePickerControll
     }
   }
   
-  lazy var outgoingBubbleImageView: JSQMessagesBubbleImage = self.setupOutgoingBubble()
-  lazy var incomingBubbleImageView: JSQMessagesBubbleImage = self.setupIncomingBubble()
+  lazy var outgoingBubbleImageView: JSQMessagesBubbleImage = self.setupOutgoingBubble(.blueGray)
+  lazy var incomingBubbleImageView: JSQMessagesBubbleImage = self.setupIncomingBubble(.blueGray)
   
   // MARK: View Lifecycle
   
   override func viewDidLoad() {
     super.viewDidLoad()
+    fetchRemoteConfig()
     observeMessages()
     
     // No avatars
@@ -237,6 +245,46 @@ final class ChatViewController: JSQMessagesViewController, UIImagePickerControll
     return FIRStorage.storage().referenceForURL("gs://chatchat-rw-cf107.appspot.com")
   }
   
+  func setupRemoteConfig() -> FIRRemoteConfig {
+    let config = FIRRemoteConfig.remoteConfig()
+    // Create Remote Config Setting to enable developer mode.
+    // Fetching configs from the server is normally limited to 5 requests per hour.
+    // Enabling developer mode allows many more requests to be made per hour, so developers
+    // can test different config values during development.
+    if let remoteConfigSettings = FIRRemoteConfigSettings(developerModeEnabled: true) {
+      config.configSettings = remoteConfigSettings
+    }
+    return config
+  }
+  
+  func fetchRemoteConfig() {
+    var expiresAfter: Double = 3600
+    // If in developer mode cacheExpiration is set to 0 so each fetch will retrieve new
+    // values from the server.
+    if (remoteConfig.configSettings.isDeveloperModeEnabled) {
+      expiresAfter = 0
+    }
+    
+    remoteConfig.fetchWithExpirationDuration(expiresAfter) { (status, error) in
+      if (status == .Success) {
+        self.remoteConfig.activateFetched()
+        let bubbleTheme = self.remoteConfig["bubbleTheme"]
+        if (bubbleTheme.source != .Static) {
+          if let theme = BubbleTheme(rawValue: Int(bubbleTheme.numberValue!)) {
+            self.outgoingBubbleImageView = self.setupOutgoingBubble(theme)
+            self.incomingBubbleImageView = self.setupIncomingBubble(theme)
+          } else {
+            self.outgoingBubbleImageView = self.setupOutgoingBubble(.blueGray)
+            self.incomingBubbleImageView = self.setupIncomingBubble(.blueGray)
+          }
+        }
+      } else {
+        print("Config not fetched")
+        print("Error \(error)")
+      }
+    }
+  }
+  
   private func fetchImageDataAtURL(photoURL: String, forMediaItem mediaItem: JSQPhotoMediaItem, clearsPhotoMessageMapOnSuccessForKey key: String?) {
     let storageRef = FIRStorage.storage().referenceForURL(photoURL)
     storageRef.dataWithMaxSize(INT64_MAX){ (data, error) in
@@ -265,7 +313,7 @@ final class ChatViewController: JSQMessagesViewController, UIImagePickerControll
       })
     }
   }
-
+  
   private func observeTyping() {
     let typingIndicatorRef = channelRef!.child("typingIndicator")
     userIsTypingRef = typingIndicatorRef.child(senderId)
@@ -331,14 +379,30 @@ final class ChatViewController: JSQMessagesViewController, UIImagePickerControll
   
   // MARK: UI and User Interaction
 
-  private func setupOutgoingBubble() -> JSQMessagesBubbleImage {
+  private func setupOutgoingBubble(theme: BubbleTheme) -> JSQMessagesBubbleImage {
     let bubbleImageFactory = JSQMessagesBubbleImageFactory()
-    return bubbleImageFactory.outgoingMessagesBubbleImageWithColor(UIColor.jsq_messageBubbleBlueColor())
+    
+    switch theme {
+    case .blueGray:
+      return bubbleImageFactory.outgoingMessagesBubbleImageWithColor(UIColor.jsq_messageBubbleBlueColor())
+    case .greenGray:
+      return bubbleImageFactory.outgoingMessagesBubbleImageWithColor(UIColor.jsq_messageBubbleGreenColor())
+    case .redBlue:
+      return bubbleImageFactory.outgoingMessagesBubbleImageWithColor(UIColor.jsq_messageBubbleRedColor())
+    }
   }
 
-  private func setupIncomingBubble() -> JSQMessagesBubbleImage {
+  private func setupIncomingBubble(theme: BubbleTheme) -> JSQMessagesBubbleImage {
     let bubbleImageFactory = JSQMessagesBubbleImageFactory()
-    return bubbleImageFactory.incomingMessagesBubbleImageWithColor(UIColor.jsq_messageBubbleLightGrayColor())
+    
+    switch theme {
+    case .blueGray:
+      return bubbleImageFactory.incomingMessagesBubbleImageWithColor(UIColor.jsq_messageBubbleLightGrayColor())
+    case .greenGray:
+      return bubbleImageFactory.incomingMessagesBubbleImageWithColor(UIColor.jsq_messageBubbleLightGrayColor())
+    case .redBlue:
+      return bubbleImageFactory.incomingMessagesBubbleImageWithColor(UIColor.jsq_messageBubbleBlueColor())
+    }
   }
   
   override func didPressAccessoryButton(sender: UIButton) {
