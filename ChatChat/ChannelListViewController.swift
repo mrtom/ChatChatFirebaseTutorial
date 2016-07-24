@@ -21,7 +21,128 @@
  */
 
 import UIKit
+import Firebase
+
+enum Section: Int {
+  case createNewChannelSection = 0
+  case currentChannelsSection
+}
 
 class ChannelListViewController: UITableViewController {
 
+  // MARK: Properties
+  var senderDisplayName: String?
+  var senderId: String?
+  var newChannelTextField: UITextField?
+  
+  private var channelRefHandle: FIRDatabaseHandle?
+  private var channels: [Channel] = []
+  
+  private lazy var ref: FIRDatabaseReference = FIRDatabase.database().reference()
+  private lazy var channelRef: FIRDatabaseReference = self.ref.child("channels")
+  
+  // MARK: View Lifecycle
+  
+  override func viewDidLoad() {
+    super.viewDidLoad()
+    title = "RW RIC"
+    observeChannels()
+  }
+  
+  deinit {
+    if let refHandle = channelRefHandle {
+      channelRef.removeObserverWithHandle(refHandle)
+    }
+  }
+  
+  // MARK :Actions
+  
+  @IBAction func createChannel(sender: AnyObject) {
+    if let name = newChannelTextField?.text {
+      let newChannelRef = channelRef.childByAutoId()
+      let channelItem = [
+        "name": name
+      ]
+      newChannelRef.setValue(channelItem)
+    }    
+  }
+  
+  // MARK: Firebase related methods
+
+  private func observeChannels() {
+    ref = FIRDatabase.database().reference()
+    channelRef = ref.child("channels")
+    
+    // We can use the observe method to listen for new
+    // channels being written to the Firebase DB
+    channelRefHandle = channelRef.observeEventType(.ChildAdded, withBlock: { (snapshot) -> Void in
+      let channelData = snapshot.value as! Dictionary<String, AnyObject>
+      let id = snapshot.key
+      if let name = channelData["name"] as! String! where name.characters.count > 0 {
+        self.channels.append(Channel(id: id, name: name))
+        self.tableView.reloadData()
+      } else {
+        print("Error! Could not decode channel data")
+      }
+    })
+  }
+  
+  // MARK: Navigation
+  
+  override func prepareForSegue(segue: UIStoryboardSegue, sender: AnyObject?) {
+    super.prepareForSegue(segue, sender: sender)
+    
+    if let channel = sender as? Channel {
+      let chatVc = segue.destinationViewController as! ChatViewController
+      
+      chatVc.senderId = senderId
+      chatVc.senderDisplayName = senderDisplayName
+      chatVc.channel = channel
+      chatVc.channelRef = channelRef.child(channel.id)
+    }
+  }
+  
+  // MARK: UITableViewDataSource
+  
+  override func numberOfSectionsInTableView(tableView: UITableView) -> Int {
+    return 2
+  }
+  
+  override func tableView(tableView: UITableView, numberOfRowsInSection section: Int) -> Int {
+    if let currentSection: Section = Section(rawValue: section) {
+      switch currentSection {
+      case .createNewChannelSection:
+        return 1
+      case .currentChannelsSection:
+        return channels.count
+      }
+    } else {
+      return 0
+    }
+  }
+  
+  override func tableView(tableView: UITableView, cellForRowAtIndexPath indexPath: NSIndexPath) -> UITableViewCell {
+    let reuseIdentifier = indexPath.section == Section.createNewChannelSection.rawValue ? "NewChannel" : "ExistingChannel"
+    let cell = tableView.dequeueReusableCellWithIdentifier(reuseIdentifier, forIndexPath: indexPath)
+
+    if indexPath.section == Section.createNewChannelSection.rawValue {
+      if let createNewChannelCell = cell as? CreateChannelCell {
+        newChannelTextField = createNewChannelCell.newChannelNameField
+      }
+    } else if indexPath.section == Section.currentChannelsSection.rawValue {
+      cell.textLabel?.text = channels[indexPath.row].name
+    }
+    
+    return cell
+  }
+
+  // MARK: UITableViewDelegate
+  
+  override func tableView(tableView: UITableView, didSelectRowAtIndexPath indexPath: NSIndexPath) {
+    if indexPath.section == Section.currentChannelsSection.rawValue {
+      let channel = channels[indexPath.row]
+      self.performSegueWithIdentifier("ShowChannel", sender: channel)
+    }
+  }
+  
 }
