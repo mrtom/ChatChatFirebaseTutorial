@@ -21,12 +21,14 @@
 */
 
 import UIKit
+import Firebase
 
 class LoginViewController: UIViewController {
   
+  // MARK: Properties
   @IBOutlet weak var nameField: UITextField!
   @IBOutlet weak var bottomLayoutGuideConstraint: NSLayoutConstraint!
-  
+
   // MARK: View Lifecycle
   
   override func viewWillAppear(_ animated: Bool) {
@@ -41,7 +43,29 @@ class LoginViewController: UIViewController {
     NotificationCenter.default.removeObserver(self, name: NSNotification.Name.UIKeyboardWillHide, object: nil)
   }
   
+  // MARK: Actions
+    
   @IBAction func loginDidTouch(_ sender: AnyObject) {
+    if nameField?.text != "" {
+      FIRAuth.auth()?.signInAnonymously(completion: { (user, error) in
+        if let err:Error = error {
+          print(err.localizedDescription)
+          return
+        }
+        
+        self.performSegue(withIdentifier: "LoginToChat", sender: nil)
+      })
+    }
+  }
+  
+  // MARK: Navigation
+  
+  override func prepare(for segue: UIStoryboardSegue, sender: AnyObject?) {
+    super.prepare(for: segue, sender: sender)
+    let navVc = segue.destination as! UINavigationController
+    let channelVc = navVc.viewControllers.first as! ChannelListViewController
+    
+    channelVc.senderDisplayName = nameField?.text
   }
   
   // MARK: - Notifications
@@ -55,6 +79,5 @@ class LoginViewController: UIViewController {
   func keyboardWillHideNotification(_ notification: Notification) {
     bottomLayoutGuideConstraint.constant = 48
   }
-  
 }
 
