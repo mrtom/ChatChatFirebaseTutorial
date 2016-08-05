@@ -26,6 +26,12 @@ import Firebase
 import JSQMessagesViewController
 import SwiftGifOrigin
 
+enum BubbleTheme: Int {
+  case blueGray = 0
+  case greenGray
+  case redBlue
+}
+
 final class ChatViewController: JSQMessagesViewController, UIImagePickerControllerDelegate, UINavigationControllerDelegate {
   
   // MARK: Properties
@@ -37,6 +43,7 @@ final class ChatViewController: JSQMessagesViewController, UIImagePickerControll
   private lazy var storageRef: FIRStorageReference = FIRStorage.storage().reference(forURL: "gs://chatchat-rw-cf107.appspot.com")
   private lazy var userIsTypingRef: FIRDatabaseReference = self.channelRef!.child("typingIndicator").child(self.senderId)
   private lazy var usersTypingQuery: FIRDatabaseQuery = self.channelRef!.child("typingIndicator").queryOrderedByValue().queryEqual(toValue: true)
+  private lazy var remoteConfig: FIRRemoteConfig = self.setupRemoteConfig()
   
   private var newMessageRefHandle: FIRDatabaseHandle?
   private var updatedMessageRefHandle: FIRDatabaseHandle?
@@ -61,14 +68,15 @@ final class ChatViewController: JSQMessagesViewController, UIImagePickerControll
     }
   }
   
-  lazy var outgoingBubbleImageView: JSQMessagesBubbleImage = self.setupOutgoingBubble()
-  lazy var incomingBubbleImageView: JSQMessagesBubbleImage = self.setupIncomingBubble()
+  lazy var outgoingBubbleImageView: JSQMessagesBubbleImage = self.setupOutgoingBubble(theme: .blueGray)
+  lazy var incomingBubbleImageView: JSQMessagesBubbleImage = self.setupIncomingBubble(theme: .blueGray)
   
   // MARK: View Lifecycle
   
   override func viewDidLoad() {
     super.viewDidLoad()
     self.senderId = FIRAuth.auth()?.currentUser?.uid
+    fetchRemoteConfig()
     observeMessages()
     
     // No avatars
@@ -369,14 +377,28 @@ final class ChatViewController: JSQMessagesViewController, UIImagePickerControll
   
   // MARK: UI and User Interaction
   
-  private func setupOutgoingBubble() -> JSQMessagesBubbleImage {
+  private func setupOutgoingBubble(theme: BubbleTheme) -> JSQMessagesBubbleImage {
     let bubbleImageFactory = JSQMessagesBubbleImageFactory()
-    return bubbleImageFactory!.outgoingMessagesBubbleImage(with: UIColor.jsq_messageBubbleBlue())
+    switch theme {
+    case .blueGray:
+      return bubbleImageFactory!.outgoingMessagesBubbleImage(with: UIColor.jsq_messageBubbleBlue())
+    case .greenGray:
+      return bubbleImageFactory!.outgoingMessagesBubbleImage(with: UIColor.jsq_messageBubbleGreen())
+    case .redBlue:
+      return bubbleImageFactory!.outgoingMessagesBubbleImage(with: UIColor.jsq_messageBubbleRed())
+    }
   }
 
-  private func setupIncomingBubble() -> JSQMessagesBubbleImage {
+  private func setupIncomingBubble(theme: BubbleTheme) -> JSQMessagesBubbleImage {
     let bubbleImageFactory = JSQMessagesBubbleImageFactory()
-    return bubbleImageFactory!.incomingMessagesBubbleImage(with: UIColor.jsq_messageBubbleLightGray())
+    switch theme {
+    case .blueGray:
+      return bubbleImageFactory!.incomingMessagesBubbleImage(with: UIColor.jsq_messageBubbleLightGray())
+    case .greenGray:
+      return bubbleImageFactory!.incomingMessagesBubbleImage(with: UIColor.jsq_messageBubbleLightGray())
+    case .redBlue:
+      return bubbleImageFactory!.incomingMessagesBubbleImage(with: UIColor.jsq_messageBubbleBlue())
+    }
   }
 
   override func didPressAccessoryButton(_ sender: UIButton) {
